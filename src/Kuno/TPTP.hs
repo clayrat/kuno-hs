@@ -50,7 +50,7 @@ problematize db = do
       premises = map tptpFormula (nonConjectureFormulas db)
   return $ case premises of
     [] -> cFormula
-    _  -> Implication (foldl1 Conjunction premises) cFormula
+    _  -> Binary Impl (foldl1 (Binary And) premises) cFormula
 
 dbContainsContradiction :: TPTPDb -> Bool
 dbContainsContradiction = any (containsContradiction . tptpFormula) . tptpFormulas

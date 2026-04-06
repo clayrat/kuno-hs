@@ -1,5 +1,6 @@
 module Kuno.Expression
   ( Term(..)
+  , BinOp(..)
   , Formula(..)
   , SymbolicAttack(..)
   , Statement(..)
@@ -46,6 +47,10 @@ data Term
   | FunTerm String [Term]
   deriving (Show, Eq, Ord)
 
+-- | Binary connective tag
+data BinOp = And | Or | Impl | RevImpl | Equiv | Nonequiv
+  deriving (Show, Eq, Ord)
+
 -- | Formulas
 data Formula
   = Atomic String [Term]
@@ -54,12 +59,7 @@ data Formula
   | Verum
   | Falsum
   | Negation Formula
-  | Conjunction Formula Formula
-  | Disjunction Formula Formula
-  | Implication Formula Formula
-  | ReverseImplication Formula Formula
-  | Equivalence Formula Formula
-  | Nonequivalence Formula Formula
+  | Binary BinOp Formula Formula
   | UniversalQ [Term] Formula
   | ExistentialQ [Term] Formula
   deriving (Show, Eq, Ord)
@@ -93,15 +93,15 @@ isNegation (Negation _) = True
 isNegation _ = False
 
 isImplication :: Formula -> Bool
-isImplication (Implication _ _) = True
+isImplication (Binary Impl _ _) = True
 isImplication _ = False
 
 isDisjunction :: Formula -> Bool
-isDisjunction (Disjunction _ _) = True
+isDisjunction (Binary Or _ _) = True
 isDisjunction _ = False
 
 isConjunction :: Formula -> Bool
-isConjunction (Conjunction _ _) = True
+isConjunction (Binary And _ _) = True
 isConjunction _ = False
 
 isGeneralization :: Formula -> Bool
@@ -124,41 +124,22 @@ unnegate :: Formula -> Formula
 unnegate (Negation f) = f
 unnegate f = f
 
--- negate_ :: Formula -> Formula
--- negate_ = Negation
-
 antecedent :: Formula -> Formula
-antecedent (Implication a _) = a
+antecedent (Binary Impl a _) = a
 antecedent f = f
 
 consequent :: Formula -> Formula
-consequent (Implication _ c) = c
+consequent (Binary Impl _ c) = c
 consequent f = f
-
--- makeBinaryConjunction :: Formula -> Formula -> Formula
--- makeBinaryConjunction = Conjunction
---
--- makeBinaryDisjunction :: Formula -> Formula -> Formula
--- makeBinaryDisjunction = Disjunction
---
--- makeImplication :: Formula -> Formula -> Formula
--- makeImplication = Implication
---
--- makeEquivalence :: Formula -> Formula -> Formula
--- makeEquivalence = Equivalence
 
 -- | Check whether any subformula satisfies a predicate
 formulaAny :: (Formula -> Bool) -> Formula -> Bool
-formulaAny p f
-  | p f = True
-formulaAny p (Negation f) = formulaAny p f
-formulaAny p (Conjunction l r) = formulaAny p l || formulaAny p r
-formulaAny p (Disjunction l r) = formulaAny p l || formulaAny p r
-formulaAny p (Implication l r) = formulaAny p l || formulaAny p r
-formulaAny p (Equivalence l r) = formulaAny p l || formulaAny p r
-formulaAny p (UniversalQ _ m) = formulaAny p m
-formulaAny p (ExistentialQ _ m) = formulaAny p m
-formulaAny _ _ = False
+formulaAny p f = p f || case f of
+  Negation g       -> formulaAny p g
+  Binary _ l r     -> formulaAny p l || formulaAny p r
+  UniversalQ _ m   -> formulaAny p m
+  ExistentialQ _ m -> formulaAny p m
+  _                -> False
 
 containsContradiction :: Formula -> Bool
 containsContradiction = formulaAny (== Falsum)
@@ -186,24 +167,14 @@ substTermForVar new var (FunTerm f args) =
 instantiate :: Formula -> Term -> Term -> Formula
 instantiate (Atomic p args) term var =
   Atomic p (map (substTermForVar term var) args)
-instantiate (Negation f) term var =
-  Negation (instantiate f term var)
-instantiate (Conjunction l r) term var =
-  Conjunction (instantiate l term var) (instantiate r term var)
-instantiate (Disjunction l r) term var =
-  Disjunction (instantiate l term var) (instantiate r term var)
-instantiate (Implication l r) term var =
-  Implication (instantiate l term var) (instantiate r term var)
-instantiate (ReverseImplication l r) term var =
-  ReverseImplication (instantiate l term var) (instantiate r term var)
-instantiate (Equivalence l r) term var =
-  Equivalence (instantiate l term var) (instantiate r term var)
-instantiate (Nonequivalence l r) term var =
-  Nonequivalence (instantiate l term var) (instantiate r term var)
 instantiate (Equation l r) term var =
   Equation (substTermForVar term var l) (substTermForVar term var r)
 instantiate (Disequation l r) term var =
   Disequation (substTermForVar term var l) (substTermForVar term var r)
+instantiate (Negation g) term var =
+  Negation (instantiate g term var)
+instantiate (Binary op l r) term var =
+  Binary op (instantiate l term var) (instantiate r term var)
 instantiate (UniversalQ bindings matrix) term var
   | var `notElem` bindings = UniversalQ bindings (instantiate matrix term var)
   | otherwise =
@@ -229,17 +200,35 @@ termsIn :: Formula -> [Term]
 termsIn (Atomic _ args) = termsInTerms args
 termsIn (Equation l r) = nubOrd (termsInTerm l ++ termsInTerm r)
 termsIn (Disequation l r) = nubOrd (termsInTerm l ++ termsInTerm r)
-termsIn (Negation f) = termsIn f
-termsIn (Conjunction l r) = nubOrd (termsIn l ++ termsIn r)
-termsIn (Disjunction l r) = nubOrd (termsIn l ++ termsIn r)
-termsIn (Implication l r) = nubOrd (termsIn l ++ termsIn r)
-termsIn (ReverseImplication l r) = nubOrd (termsIn l ++ termsIn r)
-termsIn (Equivalence l r) = nubOrd (termsIn l ++ termsIn r)
-termsIn (Nonequivalence l r) = nubOrd (termsIn l ++ termsIn r)
+termsIn (Negation g) = termsIn g
+termsIn (Binary _ l r) = nubOrd (termsIn l ++ termsIn r)
 termsIn (UniversalQ bs m) = nubOrd (bs ++ termsIn m)
 termsIn (ExistentialQ bs m) = nubOrd (bs ++ termsIn m)
 termsIn _ = []
 
+-- | Collect the leaf (variable) terms inside a term.
+--
+-- NOTE: this faithfully mirrors the Lisp code (expressions.lisp:1268):
+--
+-- @
+--   (defmethod terms-in ((x function-term))
+--     (terms-in (arguments x)))
+-- @
+--
+-- The function term itself is never included — only its variable leaves.
+-- As a result, 'nonVariableTerms' always returns [] for terms originating
+-- from formulas, and the FOL witness pool in 'dFolAttacks' is limited to
+-- fresh variables only.
+--
+-- Fix: include the FunTerm node in its own result:
+--
+-- @
+--   termsInTerm t\@(FunTerm _ args) = t : termsInTerms args
+-- @
+--
+-- This would let 'nonVariableTerms' surface ground terms like @f(a)@ as
+-- candidate witnesses for quantifier instantiation, potentially finding
+-- proofs that currently require deeper term-depth iteration.
 termsInTerm :: Term -> [Term]
 termsInTerm v@(Variable _) = [v]
 termsInTerm (FunTerm _ args) = termsInTerms args
@@ -272,13 +261,9 @@ occursFreelyIn :: Term -> Formula -> Bool
 occursFreelyIn term (Atomic _ args) = any (== term) args
 occursFreelyIn term (Equation l r) = term == l || term == r
 occursFreelyIn term (Disequation l r) = term == l || term == r
-occursFreelyIn term (Negation f) = occursFreelyIn term f
-occursFreelyIn term (Conjunction l r) = occursFreelyIn term l || occursFreelyIn term r
-occursFreelyIn term (Disjunction l r) = occursFreelyIn term l || occursFreelyIn term r
-occursFreelyIn term (Implication l r) = occursFreelyIn term l || occursFreelyIn term r
-occursFreelyIn term (ReverseImplication l r) = occursFreelyIn term l || occursFreelyIn term r
-occursFreelyIn term (Equivalence l r) = occursFreelyIn term l || occursFreelyIn term r
-occursFreelyIn term (Nonequivalence l r) = occursFreelyIn term l || occursFreelyIn term r
+occursFreelyIn term (Negation g) = occursFreelyIn term g
+occursFreelyIn term (Binary _ l r) =
+  occursFreelyIn term l || occursFreelyIn term r
 occursFreelyIn term@(Variable _) (UniversalQ bs m) =
   term `notElem` bs && occursFreelyIn term m
 occursFreelyIn term@(Variable _) (ExistentialQ bs m) =
@@ -289,13 +274,8 @@ freeVariables :: Formula -> [Term]
 freeVariables (Atomic _ args) = nubOrd $ concatMap freeVarsInTerm args
 freeVariables (Equation l r) = nubOrd (freeVarsInTerm l ++ freeVarsInTerm r)
 freeVariables (Disequation l r) = nubOrd (freeVarsInTerm l ++ freeVarsInTerm r)
-freeVariables (Negation f) = freeVariables f
-freeVariables (Conjunction l r) = nubOrd (freeVariables l ++ freeVariables r)
-freeVariables (Disjunction l r) = nubOrd (freeVariables l ++ freeVariables r)
-freeVariables (Implication l r) = nubOrd (freeVariables l ++ freeVariables r)
-freeVariables (ReverseImplication l r) = nubOrd (freeVariables l ++ freeVariables r)
-freeVariables (Equivalence l r) = nubOrd (freeVariables l ++ freeVariables r)
-freeVariables (Nonequivalence l r) = nubOrd (freeVariables l ++ freeVariables r)
+freeVariables (Negation g) = freeVariables g
+freeVariables (Binary _ l r) = nubOrd (freeVariables l ++ freeVariables r)
 freeVariables (UniversalQ bs m) =
   filter (\v -> v `notElem` bs) (freeVariables m)
 freeVariables (ExistentialQ bs m) =
@@ -310,71 +290,25 @@ freeVarsInTerm (FunTerm _ args) = concatMap freeVarsInTerm args
 properSubformulas :: Formula -> [Formula]
 properSubformulas = nubOrd . properSubs
   where
-    properSubs (Negation f) = f : properSubs f
-    properSubs (Conjunction l r) = [l, r] ++ properSubs l ++ properSubs r
-    properSubs (Disjunction l r) = [l, r] ++ properSubs l ++ properSubs r
-    properSubs (Implication l r) = [l, r] ++ properSubs l ++ properSubs r
-    properSubs (ReverseImplication l r) = [l, r] ++ properSubs l ++ properSubs r
-    properSubs (Equivalence l r) = [l, r] ++ properSubs l ++ properSubs r
-    properSubs (Nonequivalence l r) = [l, r] ++ properSubs l ++ properSubs r
-    properSubs (UniversalQ _ m) = m : properSubs m
+    properSubs (Negation g)       = g : properSubs g
+    properSubs (Binary _ l r)     = [l, r] ++ properSubs l ++ properSubs r
+    properSubs (UniversalQ _ m)   = m : properSubs m
     properSubs (ExistentialQ _ m) = m : properSubs m
-    properSubs _ = []
-
--- binarize is identity for this ADT (all connectives are already binary)
--- binarize :: Formula -> Formula
--- binarize (Negation f) = Negation (binarize f)
--- binarize (Conjunction l r) = Conjunction (binarize l) (binarize r)
--- binarize (Disjunction l r) = Disjunction (binarize l) (binarize r)
--- binarize (Implication l r) = Implication (binarize l) (binarize r)
--- binarize (ReverseImplication l r) = ReverseImplication (binarize l) (binarize r)
--- binarize (Equivalence l r) = Equivalence (binarize l) (binarize r)
--- binarize (Nonequivalence l r) = Nonequivalence (binarize l) (binarize r)
--- binarize (UniversalQ bs m) = UniversalQ bs (binarize m)
--- binarize (ExistentialQ bs m) = ExistentialQ bs (binarize m)
--- binarize f = f
+    properSubs _                  = []
 
 equivalenceToConjunction :: Formula -> Formula
-equivalenceToConjunction (Equivalence l r) =
+equivalenceToConjunction (Binary Equiv l r) =
   let l' = equivalenceToConjunction l
       r' = equivalenceToConjunction r
-  in Conjunction (Implication l' r') (Implication r' l')
-equivalenceToConjunction (Negation f) = Negation (equivalenceToConjunction f)
-equivalenceToConjunction (Conjunction l r) =
-  Conjunction (equivalenceToConjunction l) (equivalenceToConjunction r)
-equivalenceToConjunction (Disjunction l r) =
-  Disjunction (equivalenceToConjunction l) (equivalenceToConjunction r)
-equivalenceToConjunction (Implication l r) =
-  Implication (equivalenceToConjunction l) (equivalenceToConjunction r)
-equivalenceToConjunction (ReverseImplication l r) =
-  ReverseImplication (equivalenceToConjunction l) (equivalenceToConjunction r)
+  in Binary And (Binary Impl l' r') (Binary Impl r' l')
+equivalenceToConjunction (Negation g) = Negation (equivalenceToConjunction g)
+equivalenceToConjunction (Binary op l r) =
+  Binary op (equivalenceToConjunction l) (equivalenceToConjunction r)
 equivalenceToConjunction (UniversalQ bs m) =
   UniversalQ bs (equivalenceToConjunction m)
 equivalenceToConjunction (ExistentialQ bs m) =
   ExistentialQ bs (equivalenceToConjunction m)
 equivalenceToConjunction f = f
-
--- Ordering: superseded by derived Ord instances
--- formulaLt :: Formula -> Formula -> Bool
--- formulaLt (Atomic p1 _) (Atomic p2 _) = p1 < p2
--- formulaLt (Atomic _ _) _ = True
--- formulaLt (Negation _) (Atomic _ _) = False
--- formulaLt (Negation f1) (Negation f2) = formulaLt f1 f2
--- formulaLt (Negation _) _ = True
--- formulaLt _ (Atomic _ _) = False
--- formulaLt _ (Negation _) = False
--- formulaLt (Conjunction l1 r1) (Conjunction l2 r2) =
---   formulaLt l1 l2 || formulaLt r1 r2
--- formulaLt _ _ = False
---
--- statementLt :: Statement -> Statement -> Bool
--- statementLt (FormulaS f1) (FormulaS f2) = formulaLt f1 f2
--- statementLt (AttackS _) (FormulaS _) = False
--- statementLt (FormulaS _) (AttackS _) = False
--- statementLt (AttackS AttackLeftConjunct) _ = True
--- statementLt (AttackS AttackRightConjunct) (AttackS AttackLeftConjunct) = False
--- statementLt (AttackS AttackRightConjunct) _ = True
--- statementLt _ _ = False
 
 -- Pretty printing
 showTerm :: Term -> String
@@ -390,12 +324,15 @@ showFormula (Disequation l r) = showTerm l ++ " != " ++ showTerm r
 showFormula Verum = "$true"
 showFormula Falsum = "$false"
 showFormula (Negation f) = "~" ++ showFormula f
-showFormula (Conjunction l r) = "(" ++ showFormula l ++ " & " ++ showFormula r ++ ")"
-showFormula (Disjunction l r) = "(" ++ showFormula l ++ " | " ++ showFormula r ++ ")"
-showFormula (Implication l r) = "(" ++ showFormula l ++ " => " ++ showFormula r ++ ")"
-showFormula (ReverseImplication l r) = "(" ++ showFormula l ++ " <= " ++ showFormula r ++ ")"
-showFormula (Equivalence l r) = "(" ++ showFormula l ++ " <=> " ++ showFormula r ++ ")"
-showFormula (Nonequivalence l r) = "(" ++ showFormula l ++ " <~> " ++ showFormula r ++ ")"
+showFormula (Binary op l r) =
+  "(" ++ showFormula l ++ opStr op ++ showFormula r ++ ")"
+  where
+    opStr And      = " & "
+    opStr Or       = " | "
+    opStr Impl     = " => "
+    opStr RevImpl  = " <= "
+    opStr Equiv    = " <=> "
+    opStr Nonequiv = " <~> "
 showFormula (UniversalQ bs m) =
   "(! [" ++ commaSep (map showTerm bs) ++ "] : " ++ showFormula m ++ ")"
 showFormula (ExistentialQ bs m) =

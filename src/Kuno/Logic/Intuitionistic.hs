@@ -59,10 +59,6 @@ searchIntuitionisticDb db depth
 -- IL helpers
 ------------------------------------------------------------------------
 
-opponentAssertionSet :: Dialogue -> Set.Set Statement
-opponentAssertionSet d =
-  Set.fromList $ map moveStatement $ filter isOpponentMove (toList (dPlays d))
-
 opponentAssertedAtomEarlier :: Set.Set Statement -> Move -> Bool
 opponentAssertedAtomEarlier oAssertions m =
   case moveStatement m of
@@ -172,13 +168,13 @@ dPossibleAttacks' d = case lastMove d of
             in case stmt of
                  FormulaS f | not (isAtomic f) ->
                    case f of
-                     Implication ante _ ->
+                     Binary Impl ante _ ->
                        [Move (FormulaS ante) i True otherClass]
                      Negation inner ->
                        [Move (FormulaS inner) i True otherClass]
-                     Disjunction _ _ ->
+                     Binary Or _ _ ->
                        [Move (AttackS WhichDisjunct) i True otherClass]
-                     Conjunction _ _ ->
+                     Binary And _ _ ->
                        [Move (AttackS AttackLeftConjunct) i True otherClass
                        ,Move (AttackS AttackRightConjunct) i True otherClass]
                      _ -> []
@@ -186,7 +182,7 @@ dPossibleAttacks' d = case lastMove d of
             ) [start, start + 2 .. len - 1]
       in case lm of
            _ | isOpponentMove lm ->
-               let oAsserts = opponentAssertionSet d
+               let oAsserts = dOppAssertions d
                in filter (\mv -> not (isAtomicStatement (moveStatement mv))
                               || opponentAssertedAtomEarlier oAsserts mv) responses
            _ -> responses
@@ -196,10 +192,10 @@ dPossibleAttacks' d = case lastMove d of
     --   ¬φ    : attacker asserts φ (no defense is possible)
     --   φ ∨ ψ : attacker asks "which?" (defender chooses a disjunct)
     --   φ ∧ ψ : attacker picks a conjunct (defender must produce it)
-    propAttacks (Implication ante _) = [FormulaS ante]
+    propAttacks (Binary Impl ante _) = [FormulaS ante]
     propAttacks (Negation inner) = [FormulaS inner]
-    propAttacks (Disjunction _ _) = [AttackS WhichDisjunct]
-    propAttacks (Conjunction _ _) = [AttackS AttackLeftConjunct, AttackS AttackRightConjunct]
+    propAttacks (Binary Or _ _) = [AttackS WhichDisjunct]
+    propAttacks (Binary And _ _) = [AttackS AttackLeftConjunct, AttackS AttackRightConjunct]
     propAttacks _ = []
 
 -- -- D-ruleset possible defenses
@@ -257,10 +253,10 @@ dPossibleAttacks' d = case lastMove d of
 computeDefenses' :: Statement -> Statement -> [Statement]
 computeDefenses' (FormulaS attacked) attackStmt =
   case attacked of
-    Implication _ cons -> [FormulaS cons]
-    Disjunction l r -> [FormulaS l, FormulaS r]
+    Binary Impl _ cons -> [FormulaS cons]
+    Binary Or l r -> [FormulaS l, FormulaS r]
     Negation _ -> []
-    Conjunction l r ->
+    Binary And l r ->
       case attackStmt of
         AttackS AttackLeftConjunct -> [FormulaS l]
         AttackS AttackRightConjunct -> [FormulaS r]
@@ -290,7 +286,7 @@ dPossibleDefenses' d = case lastMove d of
                                  then filter (not . duplicateOpponentAttack d) moves
                                  else moves
                      filtered2 = if isOpponentMove lm
-                                 then let oAsserts = opponentAssertionSet d
+                                 then let oAsserts = dOppAssertions d
                                       in filter (\mv -> not (isAtomicStatement (moveStatement mv))
                                                      || opponentAssertedAtomEarlier oAsserts mv) filtered1
                                  else filtered1
@@ -459,7 +455,7 @@ dFolDefenses player d =
                      let defs = dFolDefenseForGeneralization d stmt attackIdx player
                      in case player of
                           Opponent  -> filter (not . duplicateOpponentAttack d) defs
-                          Proponent -> let oAsserts = opponentAssertionSet d
+                          Proponent -> let oAsserts = dOppAssertions d
                                         in filter (\mv -> not (isAtomicStatement (moveStatement mv))
                                                        || opponentAssertedAtomEarlier oAsserts mv) defs
                    _ -> []
@@ -585,8 +581,7 @@ searchPropositionalDb db depth =
 -- In first-order Kuno, O's attacks on universal statements and P's
 -- attacks on existential statements introduce witness terms. The term depth
 -- bounds the nesting of function symbols in these witnesses. We start at
--- depth 0 (constants only) and increment on Cutoff, guaranteeing that any
--- provable formula is eventually found while keeping early iterations fast.
+-- depth 0 (constants only) and increment, keeping early iterations fast.
 searchFOL :: Formula -> Int -> SearchResult
 searchFOL formula depth =
   searchFOLWith (\rs -> Just (emptyDialogue formula rs)) depth
@@ -595,19 +590,46 @@ searchFOLDb :: TPTPDb -> Int -> SearchResult
 searchFOLDb db depth =
   searchFOLWith (tptpToDialogue db) depth
 
+-- | Iterative deepening over term complexity for FOL proof search.
+--
+-- The original Lisp code (dialogue-search.lisp, intuitionistically-valid?)
+-- continues iterating on BOTH nil (Refuted) and :cutoff results, returning
+-- only on success (t).  This means invalid formulas cause an infinite loop,
+-- and termination relies entirely on the external timeout wrapper.
+--
+-- We preserve the Lisp's behaviour of continuing on both Refuted and Cutoff:
+--
+--   * Continuing on Refuted is essential for completeness: at term depth T
+--     the search is exhaustive for those terms, but richer witness terms at
+--     depth T+1 can enable proofs that were impossible before.  For example,
+--     proving  (∃y∀x(p(x) ∧ q(y))) → (∀x∃y(p(x) ∧ q(y)))  requires a
+--     witness term whose structure depends on the dialogue history.
+--
+--   * Continuing on Cutoff is less obviously useful (a larger search space
+--     at higher term depth typically makes Cutoff more likely, not less),
+--     but the No-Repeats constraint can cause the search to terminate early
+--     at one term depth while succeeding at a higher one where different
+--     move sequences are available.
+--
+-- Unlike the Lisp, we add a termination bound: term depth is capped at the
+-- dialogue depth.  A dialogue of depth D makes at most D moves, each
+-- introducing at most one witness term, so terms nested deeper than D are
+-- unreachable.  When the bound is hit we return Cutoff (inconclusive),
+-- matching the external-timeout semantics of the Lisp.
 searchFOLWith :: (Ruleset -> Maybe Dialogue) -> Int -> SearchResult
 searchFOLWith mkDialogue depth = go 0
   where
-    go termDepth_ =
-      let rs = Ruleset
-                 { rsExpander = \d -> eFolExpanderNoRepetitionsPreferDefenses d termDepth_
-                 , rsValidator = eFolValidator
-                 , rsDescription = "E, max term depth = " ++ show termDepth_
-                 }
-      in case mkDialogue rs of
-           Nothing -> Refuted
-           Just d ->
-             case proponentHasWinningStrategy d depth of
-               Proved  -> Proved
-               Cutoff  -> go (termDepth_ + 1)
-               Refuted -> Refuted
+    go termDepth_
+      | termDepth_ > depth = Cutoff
+      | otherwise =
+          let rs = Ruleset
+                     { rsExpander = \d -> eFolExpanderNoRepetitionsPreferDefenses d termDepth_
+                     , rsValidator = eFolValidator
+                     , rsDescription = "E, max term depth = " ++ show termDepth_
+                     }
+          in case mkDialogue rs of
+               Nothing -> Refuted
+               Just d ->
+                 case proponentHasWinningStrategy d depth of
+                   Proved -> Proved
+                   _      -> go (termDepth_ + 1)

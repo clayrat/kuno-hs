@@ -171,24 +171,24 @@ fofBinaryNonassoc left = do
 
 fofBinaryConnective :: Parser (Formula -> Formula -> Formula)
 fofBinaryConnective =
-      (try opIff >> return Equivalence)
-  <|> (try opXor >> return Nonequivalence)
-  <|> (try opImplies >> return Implication)
-  <|> (try opRevImplies >> return ReverseImplication)
-  <|> (try opNand >> return (\a b -> Negation (Conjunction a b)))
+      (try opIff >> return (Binary Equiv))
+  <|> (try opXor >> return (Binary Nonequiv))
+  <|> (try opImplies >> return (Binary Impl))
+  <|> (try opRevImplies >> return (Binary RevImpl))
+  <|> (try opNand >> return (\a b -> Negation (Binary And a b)))
 
 fofOrRest :: Formula -> Parser Formula
 fofOrRest left = do
   opOr
   right <- fofUnitaryFormula
-  let disj = Disjunction left right
+  let disj = Binary Or left right
   option disj (fofOrRest disj)
 
 fofAndRest :: Formula -> Parser Formula
 fofAndRest left = do
   opAnd
   right <- fofUnitaryFormula
-  let conj = Conjunction left right
+  let conj = Binary And left right
   option conj (fofAndRest conj)
 
 fofUnitaryFormula :: Parser Formula
@@ -265,7 +265,7 @@ disjunction :: Parser Formula
 disjunction = do
   first <- literal
   rest <- many (opOr >> literal)
-  return $ foldl Disjunction first rest
+  return $ foldl (Binary Or) first rest
 
 literal :: Parser Formula
 literal =

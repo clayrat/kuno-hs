@@ -50,12 +50,39 @@ data Ruleset = Ruleset
 instance Show Ruleset where
   show = rsDescription
 
--- | A dialogue game state
+-- | A dialogue game state.
+--
+-- The Lisp @dialogue@ class stores only three slots: @plays@ (a list of
+-- moves), @initial-formula@, and @ruleset@.  Every query — the set of
+-- terms, free variables, whether a move has already been played, which
+-- statements Opponent has asserted — is recomputed from @plays@ on each
+-- call.
+--
+-- This Haskell representation adds four incrementally maintained caches
+-- that are updated in 'addMove' (and rebuilt in 'truncateDialogue'):
+--
+--   * @dPlaySet@ — @Set Move@: enables O(log n) move-membership tests
+--     for the No-Repeats constraint ('moveIsRepetition'), replacing a
+--     linear scan of the play list.
+--
+--   * @dTerms@ — @Set Term@: all terms that have appeared in the
+--     dialogue so far.  Used by the FOL expanders ('dFolAttacks') to
+--     enumerate candidate witness terms for quantifier instantiation
+--     without re-traversing every move's formula.
+--
+--   * @dFreeVars@ — @Set Term@: free variables across all moves.  Also
+--     consumed by the FOL expanders for the same purpose.
+--
+--   * @dOppAssertions@ — @Set Statement@: statements asserted by
+--     Opponent.  Used by the D/E structural rule that restricts
+--     Proponent to atomic formulas that Opponent has asserted earlier
+--     ('opponentAssertedAtomEarlier' in "Kuno.Logic.Intuitionistic").
 data Dialogue = Dialogue
   { dPlays          :: Seq Move
   , dPlaySet        :: Set.Set Move
   , dTerms          :: Set.Set Term
   , dFreeVars       :: Set.Set Term
+  , dOppAssertions  :: Set.Set Statement
   , dInitialFormula :: Formula
   , dRuleset_       :: Ruleset
   }
@@ -68,14 +95,17 @@ dialogueLength :: Dialogue -> Int
 dialogueLength d = 1 + Seq.length (dPlays d)
 
 emptyDialogue :: Formula -> Ruleset -> Dialogue
-emptyDialogue = Dialogue Seq.empty Set.empty Set.empty Set.empty
+emptyDialogue = Dialogue Seq.empty Set.empty Set.empty Set.empty Set.empty
 
 addMove :: Dialogue -> Move -> Dialogue
 addMove d m = d
-  { dPlays    = dPlays d |> m
-  , dPlaySet  = Set.insert m (dPlaySet d)
-  , dTerms    = dTerms d `Set.union` Set.fromList (moveTermsIn m)
-  , dFreeVars = dFreeVars d `Set.union` Set.fromList (moveFreeVariables m)
+  { dPlays          = dPlays d |> m
+  , dPlaySet        = Set.insert m (dPlaySet d)
+  , dTerms          = dTerms d `Set.union` Set.fromList (moveTermsIn m)
+  , dFreeVars       = dFreeVars d `Set.union` Set.fromList (moveFreeVariables m)
+  , dOppAssertions  = if isOpponentMove m
+                      then Set.insert (moveStatement m) (dOppAssertions d)
+                      else dOppAssertions d
   }
 
 nthMove :: Dialogue -> Int -> Maybe Move
@@ -99,10 +129,11 @@ truncateDialogue :: Dialogue -> Int -> Dialogue
 truncateDialogue d n =
   let plays' = Seq.take n (dPlays d)
       playsList = toList plays'
-  in d { dPlays    = plays'
-       , dPlaySet  = Set.fromList playsList
-       , dTerms    = Set.fromList (concatMap moveTermsIn playsList)
-       , dFreeVars = Set.fromList (concatMap moveFreeVariables playsList)
+  in d { dPlays          = plays'
+       , dPlaySet        = Set.fromList playsList
+       , dTerms          = Set.fromList (concatMap moveTermsIn playsList)
+       , dFreeVars       = Set.fromList (concatMap moveFreeVariables playsList)
+       , dOppAssertions  = Set.fromList (map moveStatement (filter isOpponentMove playsList))
        }
 
 dialogueTermsIn :: Dialogue -> [Term]

@@ -94,14 +94,14 @@ tptpToDialogue db ruleset = do
     [] | isAtomic cFormula -> Nothing
        | otherwise -> Just $ emptyDialogue cFormula ruleset
     [premise] ->
-      let initial = Implication premise cFormula
+      let initial = Binary Impl premise cFormula
           d0 = emptyDialogue initial ruleset
           d1 = addMove d0 (Move (FormulaS premise) 0 True Opponent)
           d2 = addMove d1 (Move (FormulaS cFormula) 1 False Proponent)
       in Just d2
     _ ->
-      let conjunction = foldl1 Conjunction premises
-          initial = Implication conjunction cFormula
+      let conjunction = foldl1 (Binary And) premises
+          initial = Binary Impl conjunction cFormula
           d0 = emptyDialogue initial ruleset
       in Just $ buildPremiseMoves d0 conjunction premises cFormula
 
@@ -120,10 +120,10 @@ buildPremiseMoves d0 conjunction premises cFormula =
       [_] -> (d, i)
       (_:rest@(_:_)) ->
         let lhs = case conj of
-                    Conjunction l _ -> l
+                    Binary And l _ -> l
                     _ -> conj
             rhs = case conj of
-                    Conjunction _ r -> r
+                    Binary And _ r -> r
                     _ -> conj
             -- Proponent attacks left conjunct
             d2 = addMove d (Move (AttackS AttackLeftConjunct) i True Proponent)

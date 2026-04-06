@@ -33,17 +33,17 @@ neg = Negation
 
 -- | Implication
 (==>) :: Formula -> Formula -> Formula
-(==>) = Implication
+(==>) = Binary Impl
 infixr 2 ==>
 
 -- | Disjunction
 (\/) :: Formula -> Formula -> Formula
-(\/) = Disjunction
+(\/) = Binary Or
 infixr 3 \/
 
 -- | Conjunction
 (/\) :: Formula -> Formula -> Formula
-(/\) = Conjunction
+(/\) = Binary And
 infixr 4 /\
 
 depth :: Int
