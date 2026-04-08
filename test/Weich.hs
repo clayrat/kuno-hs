@@ -230,9 +230,13 @@ depth = 40
 isTheorem :: Formula -> SearchResult
 isTheorem f = intuitionisticallyValid (Left f) depth
 
+isProved :: SearchResult -> Bool
+isProved (Proved _) = True
+isProved _ = False
+
 assertValid :: String -> Formula -> TestTree
 assertValid name f = testCase name $
-  isTheorem f @?= Proved
+  assertBool "expected Proved" (isProved (isTheorem f))
 
 assertInvalid :: String -> Formula -> TestTree
 assertInvalid name f = testCase name $
@@ -251,7 +255,7 @@ invalidRange name gen = map (\n -> assertInvalid (name ++ " " ++ show n) (gen n)
 
 pigeonholeTests :: TestTree
 pigeonholeTests = testGroup "Pigeonhole" $
-  validRange   "pigeonhole_p" pigeonholeP [1]
+  validRange   "pigeonhole_p" pigeonholeP [1..1]
   ++ invalidRange "pigeonhole_n" pigeonholeN [1]
   -- pigeonhole_p 2: does not terminate at depth 50 (should be Proved)
   -- pigeonhole_n 2: not tested (too slow)

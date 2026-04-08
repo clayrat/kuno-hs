@@ -41,6 +41,16 @@ test-suite famous-formulas
     tasty-hunit >= 0.10
   ghc-options: -Wall -Wno-name-shadowing
 
+test-suite show-dialogue
+  type:             exitcode-stdio-1.0
+  main-is:          ShowDialogue.hs
+  hs-source-dirs:   test
+  default-language: Haskell2010
+  build-depends:
+    base       >= 4.14 && < 5,
+    kuno
+  ghc-options: -Wall -Wno-name-shadowing
+
 test-suite weich
   type:             exitcode-stdio-1.0
   main-is:          Weich.hs

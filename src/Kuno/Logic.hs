@@ -19,10 +19,20 @@ import Kuno.TPTP
 
 -- | Result of a proof search
 data SearchResult
-  = Proved        -- ^ Proponent has a winning strategy
-  | Refuted       -- ^ No winning strategy exists
-  | Cutoff        -- ^ Depth limit reached
-  deriving (Show, Eq)
+  = Proved Dialogue -- ^ Proponent has a winning strategy
+  | Refuted         -- ^ No winning strategy exists
+  | Cutoff          -- ^ Depth limit reached
+
+instance Eq SearchResult where
+  Proved _ == Proved _ = True
+  Refuted  == Refuted  = True
+  Cutoff   == Cutoff   = True
+  _        == _        = False
+
+instance Show SearchResult where
+  show (Proved _) = "Proved"
+  show Refuted    = "Refuted"
+  show Cutoff     = "Cutoff"
 
 -- | A logic packages the search strategies for bare formulas and TPTP
 -- databases.  Each logic provides its own particle rules, structural rules,
@@ -44,11 +54,11 @@ proponentHasWinningStrategy :: Dialogue -> Int -> SearchResult
 proponentHasWinningStrategy d cutoff
   | cutoff < 0 = Cutoff
   | cutoff == 0 =
-      if null (nextOpponentMoves d) then Proved else Cutoff
+      if null (nextOpponentMoves d) then Proved d else Cutoff
   | otherwise =
       let oppMoves = nextOpponentMoves d
       in if null oppMoves
-         then Proved
+         then Proved d
          else everyDisallowingCutoffs
                 (\oppMove ->
                    let dOpp = addMove d oppMove
@@ -62,27 +72,31 @@ proponentHasWinningStrategy d cutoff
                              propMoves)
                 oppMoves
 
--- | Check that a predicate holds for all elements, propagating Cutoff
+-- | Check that a predicate holds for all elements, propagating Cutoff.
+-- On success, returns the 'Proved' from the last element (the deepest dialogue).
 everyDisallowingCutoffs :: (a -> SearchResult) -> [a] -> SearchResult
-everyDisallowingCutoffs _ [] = Proved
+everyDisallowingCutoffs _ [] = Proved (error "everyDisallowingCutoffs: empty")
 everyDisallowingCutoffs f (x:xs) =
   case f x of
-    Refuted -> Refuted
-    Cutoff  -> case everyDisallowingCutoffs f xs of
-                 Refuted -> Refuted
-                 _       -> Cutoff
-    Proved  -> everyDisallowingCutoffs f xs
+    Refuted    -> Refuted
+    Cutoff     -> case everyDisallowingCutoffs f xs of
+                    Refuted -> Refuted
+                    _       -> Cutoff
+    Proved d   -> case xs of
+                    [] -> Proved d
+                    _  -> everyDisallowingCutoffs f xs
 
--- | Check that a predicate holds for at least one element, propagating Cutoff
+-- | Check that a predicate holds for at least one element, propagating Cutoff.
+-- Returns the first 'Proved' found.
 someNonCutoff :: (a -> SearchResult) -> [a] -> SearchResult
 someNonCutoff _ [] = Refuted
 someNonCutoff f (x:xs) =
   case f x of
-    Proved  -> Proved
-    Cutoff  -> case someNonCutoff f xs of
-                 Proved -> Proved
-                 _      -> Cutoff
-    Refuted -> someNonCutoff f xs
+    Proved d -> Proved d
+    Cutoff   -> case someNonCutoff f xs of
+                  Proved d -> Proved d
+                  _        -> Cutoff
+    Refuted  -> someNonCutoff f xs
 
 -- | Convert a TPTP database to an initial dialogue state
 tptpToDialogue :: TPTPDb -> Ruleset -> Maybe Dialogue

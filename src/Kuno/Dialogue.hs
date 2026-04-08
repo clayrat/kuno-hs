@@ -30,6 +30,9 @@ module Kuno.Dialogue
   , moveIsRepetition
   , mostRecentOpenAttackOn
   , isAtomicStatement
+  , showDialogue
+  , showStatement
+  , showMove
   ) where
 
 import Data.Foldable (toList)
@@ -185,8 +188,9 @@ moveIsRepetition d m = m `Set.member` dPlaySet d
 continuations :: Dialogue -> [Move]
 continuations d =
   let rs = dRuleset_ d
+      validate m = rsValidator rs (addMove d m)
       moves = rsExpander rs d
-  in nubOrd moves
+  in nubOrd (filter validate moves)
 
 nextProponentMoves :: Dialogue -> [Move]
 nextProponentMoves = filter isProponentMove . continuations
@@ -203,3 +207,47 @@ opponentWins :: Dialogue -> Bool
 opponentWins d = case lastMove d of
   Just m -> isOpponentMove m && null (nextProponentMoves d)
   Nothing -> False
+
+-- Pretty-printing
+
+showStatement :: Statement -> String
+showStatement (FormulaS f) = showFormula f
+showStatement (AttackS AttackLeftConjunct) = "L?"
+showStatement (AttackS AttackRightConjunct) = "R?"
+showStatement (AttackS WhichDisjunct) = "?∨"
+showStatement (AttackS (WhichInstance (Just t))) = "?" ++ showTerm t
+showStatement (AttackS (WhichInstance Nothing)) = "?"
+showStatement (TermS t) = showTerm t
+
+showMove :: Move -> String
+showMove m =
+  let player = case movePlayer m of { Proponent -> "P"; Opponent -> "O" }
+      kind = if moveIsAttack m then "atk" else "def"
+      ref = show (moveReference m)
+  in player ++ " [" ++ ref ++ "] " ++ kind ++ " " ++ showStatement (moveStatement m)
+
+-- | Pretty-print a dialogue as a numbered table.
+--
+-- @
+--   0  P       thesis  (p => (q => p))
+--   1  O [0]   atk     p
+--   2  P [1]   def     (q => p)
+--   3  O [2]   atk     q
+--   4  P [3]   def     p
+-- @
+showDialogue :: Dialogue -> String
+showDialogue d =
+  let header = showLine (0 :: Int) "P" "" "thesis" (showFormula (dInitialFormula d))
+      moves = toList (dPlays d)
+      body = zipWith showMoveLine [1 :: Int ..] moves
+  in unlines (header : body)
+  where
+    showMoveLine i m =
+      let player = case movePlayer m of { Proponent -> "P"; Opponent -> "O" }
+          ref = "[" ++ show (moveReference m) ++ "]"
+          kind = if moveIsAttack m then "atk" else "def"
+      in showLine i player ref kind (showStatement (moveStatement m))
+    showLine i player ref kind stmt =
+      let iStr = show i
+          pad n s = s ++ replicate (max 0 (n - length s)) ' '
+      in pad 4 iStr ++ pad 3 player ++ pad 6 ref ++ pad 8 kind ++ stmt

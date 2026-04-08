@@ -41,9 +41,9 @@ optsInfo = info (optionsParser <**> helper)
  <> header "kuno - intuitionistic theorem prover" )
 
 resultToSZS :: SearchResult -> String
-resultToSZS Proved  = "Theorem"
-resultToSZS Refuted = "CounterSatisfiable"
-resultToSZS Cutoff  = "ResourceOut"
+resultToSZS (Proved _) = "Theorem"
+resultToSZS Refuted    = "CounterSatisfiable"
+resultToSZS Cutoff     = "ResourceOut"
 
 main :: IO ()
 main = do

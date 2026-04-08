@@ -574,8 +574,8 @@ searchPropositionalDb db depth =
       case tptpToDialogue db rs of
         Nothing -> Refuted
         Just d  -> case proponentHasWinningStrategy d depth of
-                     Proved -> Proved
-                     _      -> tryRulesets rest
+                     Proved d' -> Proved d'
+                     _         -> tryRulesets rest
 
 -- | FOL search with iterative deepening on term complexity.
 -- In first-order Kuno, O's attacks on universal statements and P's
@@ -631,5 +631,5 @@ searchFOLWith mkDialogue depth = go 0
                Nothing -> Refuted
                Just d ->
                  case proponentHasWinningStrategy d depth of
-                   Proved -> Proved
-                   _      -> go (termDepth_ + 1)
+                   Proved d' -> Proved d'
+                   _         -> go (termDepth_ + 1)

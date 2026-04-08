@@ -52,14 +52,17 @@ depth = 30
 isTheorem :: Formula -> SearchResult
 isTheorem f = intuitionisticallyValid (Left f) depth
 
+isProved :: SearchResult -> Bool
+isProved (Proved _) = True
+isProved _ = False
+
 assertValid :: String -> Formula -> TestTree
 assertValid name f = testCase name $
-  isTheorem f @?= Proved
+  assertBool "expected Proved" (isProved (isTheorem f))
 
 assertInvalid :: String -> Formula -> TestTree
 assertInvalid name f = testCase name $
-  -- assertBool ("expected Refuted or Cutoff, got Proved") $
-    isTheorem f @?= Refuted -- /= Proved
+  isTheorem f @?= Refuted
 
 ------------------------------------------------------------------------
 -- Famous formulas from famous-formulas.lisp
