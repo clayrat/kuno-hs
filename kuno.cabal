@@ -63,6 +63,18 @@ test-suite weich
     tasty-hunit >= 0.10
   ghc-options: -Wall -Wno-name-shadowing
 
+test-suite tptp-problems
+  type:             exitcode-stdio-1.0
+  main-is:          TPTPProblems.hs
+  hs-source-dirs:   test
+  default-language: Haskell2010
+  build-depends:
+    base       >= 4.14 && < 5,
+    kuno,
+    tasty      >= 1.4,
+    tasty-hunit >= 0.10
+  ghc-options: -Wall -Wno-name-shadowing
+
 executable kuno
   main-is:          Main.hs
   hs-source-dirs:   app
