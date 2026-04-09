@@ -28,9 +28,14 @@ isTheoremTPTP tptpString =
     Left err  -> error $ "Parse error: " ++ err
     Right db  -> intuitionisticallyValid (Right db) depth
 
+-- TODO factor out common code between test suites
+isProved :: SearchResult -> Bool
+isProved (Proved _) = True
+isProved _ = False
+
 assertValidTPTP :: String -> String -> TestTree
 assertValidTPTP name tptp = testCase name $
-  isTheoremTPTP tptp @?= Proved
+  assertBool "expected Proved" (isProved (isTheoremTPTP tptp))
 
 ------------------------------------------------------------------------
 -- Three Wise Men puzzle
